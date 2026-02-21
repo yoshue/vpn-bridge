@@ -16,24 +16,24 @@ class BridgeService : Service() {
     private var proxy: ProxyServer? = null
     private val canalId = "VPN_BRIDGE_PRO"
 
-    // --- ARTILLERÍA: Servidor Proxy para mover los datos ---
+    // Servidor Proxy Interno
     private inner class ProxyServer(port: Int) : NanoHTTPD(port) {
         override fun serve(session: IHTTPSession): Response {
-            // Este servidor responde a la TV usando la conexión activa del móvil (VPN)
             return newFixedLengthResponse(Response.Status.OK, "text/plain", "Bridge Conectado")
         }
     }
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(1, crearNotificacion())
+        // 1. Iniciar Notificación inmediatamente para evitar cierres
+        startForeground(1, obtenerNotificacion())
         
-        // Iniciamos el motor de datos en el puerto 8282
+        // 2. Iniciar Servidor de datos
         proxy = ProxyServer(8282)
         try {
             proxy?.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         } catch (e: IOException) {
-            Log.e("VPNBridge", "Error al iniciar motor de datos: ${e.message}")
+            Log.e("VPNBridge", "Error Proxy: ${e.message}")
         }
     }
 
@@ -41,28 +41,63 @@ class BridgeService : Service() {
         manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
         channel = manager?.initialize(this, mainLooper, null)
 
-        // --- LIMPIEZA DE ANTENA (Para evitar Error P2P: 2) ---
-        // Intentamos forzar el cierre de cualquier red previa que bloquee el hardware
+        // Limpieza profunda para evitar el Error P2P: 2
         manager?.removeGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
-                Log.d("VPNBridge", "Antena liberada, creando grupo...")
-                iniciarCreacionDeRed()
-            }
-            override fun onFailure(reason: Int) {
-                // Si falla (porque no hay grupo previo), intentamos crear la red igualmente
-                iniciarCreacionDeRed()
-            }
+            override fun onSuccess() { iniciarGrupo() }
+            override fun onFailure(reason: Int) { iniciarGrupo() }
         })
         
         return START_STICKY
     }
 
-    private fun iniciarCreacionDeRed() {
+    private fun iniciarGrupo() {
         manager?.createGroup(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
-                // Esperamos 3 segundos a que EMUI estabilice la red antes de pedir los datos
+                // Esperamos a que el sistema asigne la clave
                 Handler(Looper.getMainLooper()).postDelayed({
-                    solicitarDatosDeRed()
+                    obtenerInformacion()
                 }, 3000)
             }
-            override fun onFailure(reason: Int)
+            override fun onFailure(reason: Int) {
+                enviarAMain("Error P2P: $reason\nRevisa: WiFi APAGADO y GPS activo.")
+            }
+        })
+    }
+
+    private fun obtenerInformacion() {
+        manager?.requestGroupInfo(channel) { group ->
+            if (group != null) {
+                val datos = "PUENTE NIVEL PRO\n\nRED: ${group.networkName}\nCLAVE: ${group.passphrase}\n\nPuerto: 8282 | IP: 192.168.49.1"
+                enviarAMain(datos)
+            } else {
+                enviarAMain("Error al leer red.\nReintenta con GPS encendido.")
+            }
+        }
+    }
+
+    private fun enviarAMain(txt: String) {
+        val intent = Intent("VPN_BRIDGE_UPDATE")
+        intent.putExtra("info", txt)
+        sendBroadcast(intent)
+    }
+
+    private fun obtenerNotificacion(): Notification {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(NotificationChannel(canalId, "VPN Bridge", NotificationManager.IMPORTANCE_LOW))
+        }
+        return NotificationCompat.Builder(this, canalId)
+            .setContentTitle("Puente VPN Activo")
+            .setContentText("Enrutando datos para Smart TV...")
+            .setSmallIcon(android.R.drawable.ic_menu_share)
+            .build()
+    }
+
+    override fun onDestroy() {
+        proxy?.stop()
+        manager?.removeGroup(channel, null)
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}

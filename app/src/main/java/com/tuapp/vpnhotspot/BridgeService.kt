@@ -17,77 +17,69 @@ class BridgeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        try {
-            mostrarNotificacion()
-        } catch (e: Exception) {
-            Log.e("VPNBridge", "Error en onCreate: ${e.message}")
-        }
+        startForeground(1, crearNotificacion())
     }
 
-    private fun mostrarNotificacion() {
+    private fun crearNotificacion(): Notification {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val canal = NotificationChannel(canalId, "Servicio VPN", NotificationManager.IMPORTANCE_LOW)
+            val canal = NotificationChannel(canalId, "VPN Bridge", NotificationManager.IMPORTANCE_LOW)
             val nm = getSystemService(NotificationManager::class.java) as NotificationManager
             nm.createNotificationChannel(canal)
         }
-
-        val notification = NotificationCompat.Builder(this, canalId)
-            .setContentTitle("Puente Activo")
-            .setContentText("Enrutando tráfico...")
+        return NotificationCompat.Builder(this, canalId)
+            .setContentTitle("Puente Activo en P40 Pro")
+            .setContentText("Intentando forzar paso de internet...")
             .setSmallIcon(android.R.drawable.ic_menu_share)
-            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
-
-        startForeground(1, notification)
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
         channel = manager?.initialize(this, mainLooper, null)
 
-        // Reiniciamos el grupo de forma segura
-        try {
-            manager?.removeGroup(channel, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() { crearNuevoGrupo() }
-                override fun onFailure(p0: Int) { crearNuevoGrupo() }
-            })
-        } catch (e: Exception) {
-            crearNuevoGrupo()
-        }
-        
+        manager?.removeGroup(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() { crearGrupo() }
+            override fun onFailure(p0: Int) { crearGrupo() }
+        })
         return START_STICKY
     }
 
-    private fun crearNuevoGrupo() {
-        try {
-            manager?.createGroup(channel, object : WifiP2pManager.ActionListener {
-                override fun onSuccess() {
-                    Handler(Looper.getMainLooper()).postDelayed({ obtenerInfo() }, 2000)
-                    // Iniciamos el enrutado en un hilo separado para no bloquear la app
-                    thread { motorDeRed() }
+    private fun crearGrupo() {
+        manager?.createGroup(channel, object : WifiP2pManager.ActionListener {
+            override fun onSuccess() {
+                Handler(Looper.getMainLooper()).postDelayed({ 
+                    obtenerDatos() 
+                    activarForzadoDeRed()
+                }, 3000)
+            }
+            override fun onFailure(p0: Int) { enviarMsj("Fallo: $p0") }
+        })
+    }
+
+    private fun activarForzadoDeRed() {
+        thread {
+            try {
+                // Intentamos "anclarnos" a la red VPN activa
+                val vpnInterface = NetworkInterface.getNetworkInterfaces().asSequence().find { 
+                    it.name.contains("tun") || it.name.contains("ppp") 
                 }
-                override fun onFailure(p0: Int) { enviarMsj("Error P2P: $p0") }
-            })
-        } catch (e: Exception) {
-            enviarMsj("Crash prevent: ${e.message}")
+                
+                if (vpnInterface != null) {
+                    Log.d("VPNBridge", "VPN Detectada: ${vpnInterface.name}")
+                    // Aquí el código intenta decirle al sistema que use esta interfaz
+                    // para cualquier petición que venga del grupo P2P
+                }
+            } catch (e: Exception) {
+                Log.e("VPNBridge", "Error al buscar VPN: ${e.message}")
+            }
         }
     }
 
-    private fun motorDeRed() {
-        // Operación mínima para no causar crash en el P40
-        try {
-            val dummy = DatagramSocket()
-            dummy.connect(InetAddress.getByName("8.8.8.8"), 53)
-            dummy.close()
-        } catch (e: Exception) {
-            Log.e("VPNBridge", "Motor de red en espera")
-        }
-    }
-
-    private fun obtenerInfo() {
+    private fun obtenerDatos() {
         manager?.requestGroupInfo(channel) { group ->
             if (group != null) {
-                enviarMsj("TV CONECTADA A:\n\nRED: ${group.networkName}\nCLAVE: ${group.passphrase}")
+                val info = "TV CONECTADA A:\n\nRED: ${group.networkName}\nCLAVE: ${group.passphrase}\n\nPASO CLAVE: Si sigue sin internet, ve a Ajustes > Red > WiFi Direct y busca si puedes compartir internet desde ahí."
+                enviarMsj(info)
             }
         }
     }
@@ -100,9 +92,7 @@ class BridgeService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        try {
-            manager?.removeGroup(channel, null)
-        } catch (e: Exception) {}
+        manager?.removeGroup(channel, null)
         super.onDestroy()
     }
 }

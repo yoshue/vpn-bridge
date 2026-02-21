@@ -14,13 +14,12 @@ class BridgeService : Service() {
     private var manager: WifiP2pManager? = null
     private var channel: WifiP2pManager.Channel? = null
     private val canalId = "VPN_BRIDGE_CHANNEL"
-    private var running = true
 
     override fun onCreate() {
         super.onCreate()
         val notification = NotificationCompat.Builder(this, canalId)
-            .setContentTitle("VPN Bridge: Modo Transparente")
-            .setContentText("Puenteando tráfico hacia la VPN...")
+            .setContentTitle("Puente Activo (P40 Pro)")
+            .setContentText("Forzando salida de datos...")
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .build()
         startForeground(1, notification)
@@ -33,32 +32,32 @@ class BridgeService : Service() {
         manager?.createGroup(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
                 Handler(Looper.getMainLooper()).postDelayed({ obtenerDatos() }, 2000)
-                iniciarPuenteDeDatos()
+                // Iniciamos el "Eco de Red"
+                thread { iniciarEcoRed() }
             }
-            override fun onFailure(p0: Int) { enviarUpdate("Error de inicio: $p0") }
+            override fun onFailure(p0: Int) { enviarUpdate("Fallo: $p0") }
         })
         return START_STICKY
     }
 
-    private fun iniciarPuenteDeDatos() {
-        thread {
-            try {
-                // Intentamos "despertar" el reenvío de paquetes 
-                // forzando una conexión de socket a través de la interfaz VPN
-                val socket = Socket()
-                socket.connect(InetSocketAddress("8.8.8.8", 53), 1000)
-                socket.close()
-                Log.d("VPNBridge", "Interfaz de salida VPN detectada y activa.")
-            } catch (e: Exception) {
-                Log.e("VPNBridge", "VPN no detectada o bloqueada.")
-            }
+    private fun iniciarEcoRed() {
+        try {
+            // Intentamos abrir un socket que "despierte" la ruta hacia la VPN
+            // Esto le dice al kernel de Huawei: "hay tráfico saliendo de aquí"
+            val selector = java.nio.channels.Selector.open()
+            val socket = DatagramSocket(67) // Puerto DHCP común
+            socket.broadcast = true
+            Log.d("VPNBridge", "Eco de red iniciado")
+        } catch (e: Exception) {
+            Log.e("VPNBridge", "Error eco: ${e.message}")
         }
     }
 
     private fun obtenerDatos() {
         manager?.requestGroupInfo(channel) { group ->
             if (group != null) {
-                val info = "TV CONECTADA A:\n\nRED: ${group.networkName}\nCLAVE: ${group.passphrase}\n\nPASO FINAL: Si sigue sin internet, busca 'Puente WiFi' en los ajustes de tu Huawei."
+                // Forzamos la IP estándar de WiFi Direct en el mensaje
+                val info = "TV CONECTADA A:\n\nRED: ${group.networkName}\nCLAVE: ${group.passphrase}\n\nIP GATEWAY: 192.168.49.1"
                 enviarUpdate(info)
             }
         }
@@ -72,7 +71,6 @@ class BridgeService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        running = false
         manager?.removeGroup(channel, null)
         super.onDestroy()
     }

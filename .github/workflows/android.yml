@@ -12,11 +12,15 @@ jobs:
       with:
         java-version: '17'
         distribution: 'temurin'
-        cache: gradle
-    - name: Grant execute permission
-      run: chmod +x gradlew
+    
+    - name: Setup Gradle
+      uses: gradle/gradle-build-action@v2
+      with:
+        gradle-version: 8.0
+
     - name: Build APK
-      run: ./gradlew assembleDebug
+      run: gradle assembleDebug
+
     - name: Upload APK
       uses: actions/upload-artifact@v3
       with:

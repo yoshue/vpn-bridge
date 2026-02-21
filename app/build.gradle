@@ -4,13 +4,12 @@ plugins {
 }
 
 android {
-    // Hemos actualizado el namespace para que coincida con la nueva identidad
-    namespace 'com.tuapp.vpnbridge.final'
+    // Cambiamos 'final' por 'app' para que sea válido
+    namespace 'com.tuapp.vpnbridge.app'
     compileSdk 34
 
     defaultConfig {
-        // Al cambiar este ID, el teléfono cree que es una app diferente y nueva
-        applicationId "com.tuapp.vpnbridge.final"
+        applicationId "com.tuapp.vpnbridge.app"
         minSdk 29
         targetSdk 34
         versionCode 1
@@ -32,7 +31,6 @@ android {
 }
 
 dependencies {
-    // Estas son las librerías necesarias para que la app tenga botones y diseño
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.11.0'

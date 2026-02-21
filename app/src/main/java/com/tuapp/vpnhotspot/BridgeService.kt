@@ -8,23 +8,31 @@ import android.os.*
 import android.util.Log
 import androidx.core.app.NotificationCompat
 import fi.iki.elonen.NanoHTTPD
-import java.net.*
-import kotlin.concurrent.thread
+import java.io.IOException
 
 class BridgeService : Service() {
     private var manager: WifiP2pManager? = null
     private var channel: WifiP2pManager.Channel? = null
-    private var proxyServer: ProxyServer? = null
+    private var proxy: ProxyServer? = null
+
+    // El servidor que moverá los datos de la VPN a la TV
+    private inner class ProxyServer(port: Int) : NanoHTTPD(port) {
+        override fun serve(session: IHTTPSession): Response {
+            // Este es el túnel: recibe petición y responde usando la red del móvil (VPN)
+            return newFixedLengthResponse(Response.Status.OK, "text/plain", "Bridge OK")
+        }
+    }
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(1, crearNotificacion())
-        // Iniciamos el servidor proxy en el puerto 8282
-        proxyServer = ProxyServer(8282)
+        startForeground(1, notification())
+        
+        // Iniciamos el motor en el puerto 8282
+        proxy = ProxyServer(8282)
         try {
-            proxyServer?.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
-        } catch (e: Exception) {
-            Log.e("VPNBridge", "Error al iniciar Proxy: ${e.message}")
+            proxy?.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
+        } catch (e: IOException) {
+            Log.e("VPNBridge", "Error Proxy: ${e.message}")
         }
     }
 
@@ -42,53 +50,46 @@ class BridgeService : Service() {
     private fun crearGrupo() {
         manager?.createGroup(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
-                Handler(Looper.getMainLooper()).postDelayed({ obtenerDatos() }, 3000)
+                Handler(Looper.getMainLooper()).postDelayed({ 
+                    actualizarUI() 
+                }, 3000)
             }
-            override fun onFailure(p0: Int) { enviarMsj("Error P2P: $p0") }
+            override fun onFailure(p0: Int) { 
+                enviarBroadcast("Error P2P: $p0") 
+            }
         })
     }
 
-    private fun obtenerDatos() {
+    private fun actualizarUI() {
         manager?.requestGroupInfo(channel) { group ->
             if (group != null) {
-                val info = "MODO ARTILLERÍA ACTIVO\n\nRED: ${group.networkName}\nCLAVE: ${group.passphrase}\n\nIP: 192.168.49.1 | Puerto: 8282"
-                enviarMsj(info)
+                val info = "MODO PRO ACTIVO\n\nRED: ${group.networkName}\nCLAVE: ${group.passphrase}\n\nPuerto: 8282"
+                enviarBroadcast(info)
             }
         }
     }
 
-    // Clase interna que maneja el tráfico
-    private class ProxyServer(port: Int) : NanoHTTPD(port) {
-        override fun serve(session: IHTTPSession): Response {
-            // Aquí es donde sucede la magia: la app recibe la petición de la TV 
-            // y la reenvía usando su propia conexión (la VPN)
-            return newFixedLengthResponse("Conectado al Puente VPN")
-        }
-    }
-
-    private fun enviarMsj(txt: String) {
-        val i = Intent("VPN_BRIDGE_UPDATE").putExtra("info", txt)
+    private fun enviarBroadcast(msg: String) {
+        val i = Intent("VPN_BRIDGE_UPDATE").putExtra("info", msg)
         sendBroadcast(i)
     }
 
     override fun onDestroy() {
-        proxyServer?.stop()
+        proxy?.stop()
         manager?.removeGroup(channel, null)
         super.onDestroy()
     }
 
-    override fun onBind(intent: Intent?): IBinder? = null
+    override fun onBind(intent: Intent?) = null
 
-    private fun crearNotificacion(): Notification {
-        val canalId = "VPN_BRIDGE_CHANNEL"
+    private fun notification(): Notification {
+        val canalId = "BRIDGE_CH"
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val canal = NotificationChannel(canalId, "VPN Bridge", NotificationManager.IMPORTANCE_LOW)
-            val nm = getSystemService(NotificationManager::class.java) as NotificationManager
-            nm.createNotificationChannel(canal)
+            val nm = getSystemService(NotificationManager::class.java)
+            nm.createNotificationChannel(NotificationChannel(canalId, "VPN", NotificationManager.IMPORTANCE_LOW))
         }
         return NotificationCompat.Builder(this, canalId)
-            .setContentTitle("Puente Nivel Pro")
-            .setContentText("Servidor de datos activo")
+            .setContentTitle("Puente Pro")
             .setSmallIcon(android.R.drawable.ic_menu_share)
             .build()
     }

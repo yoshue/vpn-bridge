@@ -4,12 +4,12 @@ plugins {
 }
 
 android {
-    // Cambiamos 'final' por 'app' para que sea válido
-    namespace 'com.tuapp.vpnbridge.app'
+    // Nombre de "la calle" donde vive tu app
+    namespace 'com.tuapp.vpnbridge'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.tuapp.vpnbridge.app"
+        applicationId "com.tuapp.vpnbridge"
         minSdk 29
         targetSdk 34
         versionCode 1

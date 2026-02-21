@@ -18,24 +18,19 @@ class BridgeService : Service() {
     private var proxy: ProxyServer? = null
     private val canalId = "VPN_BRIDGE_PRO"
 
-    // --- ARTILLERÍA: Servidor Proxy con Refuerzo de DNS ---
     private inner class ProxyServer(port: Int) : NanoHTTPD(port) {
         override fun serve(session: IHTTPSession): Response {
-            // Cabeceras para mantener el túnel abierto con la Smart TV
             val response = newFixedLengthResponse(Response.Status.OK, "text/plain", "Bridge Conectado")
             response.addHeader("Cache-Control", "no-cache")
             response.addHeader("Connection", "keep-alive")
             response.addHeader("Access-Control-Allow-Origin", "*")
             
-            // REFUERZO DE RED: Obligamos al P40 Pro a resolver tráfico externo
-            // Esto ayuda a que las apps de la TV no se queden "colgadas"
             thread {
                 try {
                     val address = InetAddress.getByName("8.8.8.8")
-                    address.isReachable(500) 
-                    Log.d("VPNBridge", "DNS Refresh exitoso")
+                    address.isReachable(500)
                 } catch (e: Exception) {
-                    Log.e("VPNBridge", "Refresco fallido: ${e.message}")
+                    Log.e("VPNBridge", "DNS Refresh Error")
                 }
             }
             return response
@@ -44,15 +39,23 @@ class BridgeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
-        // Iniciar notificación para que el P40 Pro no cierre la app
-        startForeground(1, obtenerNotificacion())
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            nm.createNotificationChannel(NotificationChannel(canalId, "VPN Bridge", NotificationManager.IMPORTANCE_LOW))
+        }
+        val notification = NotificationCompat.Builder(this, canalId)
+            .setContentTitle("Puente VPN Activo")
+            .setContentText("Enrutando datos...")
+            .setSmallIcon(android.R.drawable.ic_menu_share)
+            .build()
         
-        // Iniciar el motor de datos en el puerto 8282
+        startForeground(1, notification)
+
         proxy = ProxyServer(8282)
         try {
             proxy?.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         } catch (e: IOException) {
-            Log.e("VPNBridge", "Error al iniciar Proxy: ${e.message}")
+            Log.e("VPNBridge", "Proxy Start Error")
         }
     }
 
@@ -60,24 +63,46 @@ class BridgeService : Service() {
         manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
         channel = manager?.initialize(this, mainLooper, null)
 
-        // LIMPIEZA DE ANTENA: Evita el "Error P2P: 2"
         manager?.removeGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() { iniciarGrupo() }
-            override fun onFailure(reason: Int) { iniciarGrupo() }
+            override fun onSuccess() { crearGrupo() }
+            override fun onFailure(reason: Int) { crearGrupo() }
         })
-        
         return START_STICKY
     }
 
-    private fun iniciarGrupo() {
+    private fun crearGrupo() {
         manager?.createGroup(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
-                // Espera de 3 segundos para estabilidad en EMUI
-                Handler(Looper.getMainLooper()).postDelayed({
-                    obtenerInformacion()
-                }, 3000)
+                Handler(Looper.getMainLooper()).postDelayed({ obtenerInfo() }, 3000)
             }
             override fun onFailure(reason: Int) {
-                enviarAMain("Error P2P: $reason\nIMPORTANTE: WiFi APAGADO y GPS ON.")
+                actualizarUI("Error P2P: $reason\nWiFi OFF y GPS ON.")
             }
         })
+    }
+
+    private fun obtenerInfo() {
+        manager?.requestGroupInfo(channel) { group ->
+            if (group != null) {
+                val datos = "PUENTE NIVEL PRO\n\nRED: ${group.networkName}\nCLAVE: ${group.passphrase}\n\nPuerto: 8282 | IP: 192.168.49.1"
+                actualizarUI(datos)
+            } else {
+                actualizarUI("Error: Reinicia GPS")
+            }
+        }
+    }
+
+    private fun actualizarUI(txt: String) {
+        val intent = Intent("VPN_BRIDGE_UPDATE")
+        intent.putExtra("info", txt)
+        sendBroadcast(intent)
+    }
+
+    override fun onDestroy() {
+        proxy?.stop()
+        manager?.removeGroup(channel, null)
+        super.onDestroy()
+    }
+
+    override fun onBind(intent: Intent?): IBinder? = null
+}

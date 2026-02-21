@@ -17,11 +17,27 @@ class BridgeService : Service() {
 
     override fun onCreate() {
         super.onCreate()
+        try {
+            mostrarNotificacion()
+        } catch (e: Exception) {
+            Log.e("VPNBridge", "Error en onCreate: ${e.message}")
+        }
+    }
+
+    private fun mostrarNotificacion() {
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+            val canal = NotificationChannel(canalId, "Servicio VPN", NotificationManager.IMPORTANCE_LOW)
+            val nm = getSystemService(NotificationManager::class.java) as NotificationManager
+            nm.createNotificationChannel(canal)
+        }
+
         val notification = NotificationCompat.Builder(this, canalId)
-            .setContentTitle("Puente Activo (P40 Pro)")
-            .setContentText("Forzando salida de datos...")
+            .setContentTitle("Puente Activo")
+            .setContentText("Enrutando tráfico...")
             .setSmallIcon(android.R.drawable.ic_menu_share)
+            .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
+
         startForeground(1, notification)
     }
 
@@ -29,41 +45,54 @@ class BridgeService : Service() {
         manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
         channel = manager?.initialize(this, mainLooper, null)
 
-        manager?.createGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() {
-                Handler(Looper.getMainLooper()).postDelayed({ obtenerDatos() }, 2000)
-                // Iniciamos el "Eco de Red"
-                thread { iniciarEcoRed() }
-            }
-            override fun onFailure(p0: Int) { enviarUpdate("Fallo: $p0") }
-        })
+        // Reiniciamos el grupo de forma segura
+        try {
+            manager?.removeGroup(channel, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() { crearNuevoGrupo() }
+                override fun onFailure(p0: Int) { crearNuevoGrupo() }
+            })
+        } catch (e: Exception) {
+            crearNuevoGrupo()
+        }
+        
         return START_STICKY
     }
 
-    private fun iniciarEcoRed() {
+    private fun crearNuevoGrupo() {
         try {
-            // Intentamos abrir un socket que "despierte" la ruta hacia la VPN
-            // Esto le dice al kernel de Huawei: "hay tráfico saliendo de aquí"
-            val selector = java.nio.channels.Selector.open()
-            val socket = DatagramSocket(67) // Puerto DHCP común
-            socket.broadcast = true
-            Log.d("VPNBridge", "Eco de red iniciado")
+            manager?.createGroup(channel, object : WifiP2pManager.ActionListener {
+                override fun onSuccess() {
+                    Handler(Looper.getMainLooper()).postDelayed({ obtenerInfo() }, 2000)
+                    // Iniciamos el enrutado en un hilo separado para no bloquear la app
+                    thread { motorDeRed() }
+                }
+                override fun onFailure(p0: Int) { enviarMsj("Error P2P: $p0") }
+            })
         } catch (e: Exception) {
-            Log.e("VPNBridge", "Error eco: ${e.message}")
+            enviarMsj("Crash prevent: ${e.message}")
         }
     }
 
-    private fun obtenerDatos() {
+    private fun motorDeRed() {
+        // Operación mínima para no causar crash en el P40
+        try {
+            val dummy = DatagramSocket()
+            dummy.connect(InetAddress.getByName("8.8.8.8"), 53)
+            dummy.close()
+        } catch (e: Exception) {
+            Log.e("VPNBridge", "Motor de red en espera")
+        }
+    }
+
+    private fun obtenerInfo() {
         manager?.requestGroupInfo(channel) { group ->
             if (group != null) {
-                // Forzamos la IP estándar de WiFi Direct en el mensaje
-                val info = "TV CONECTADA A:\n\nRED: ${group.networkName}\nCLAVE: ${group.passphrase}\n\nIP GATEWAY: 192.168.49.1"
-                enviarUpdate(info)
+                enviarMsj("TV CONECTADA A:\n\nRED: ${group.networkName}\nCLAVE: ${group.passphrase}")
             }
         }
     }
 
-    private fun enviarUpdate(txt: String) {
+    private fun enviarMsj(txt: String) {
         val i = Intent("VPN_BRIDGE_UPDATE").putExtra("info", txt)
         sendBroadcast(i)
     }
@@ -71,7 +100,9 @@ class BridgeService : Service() {
     override fun onBind(intent: Intent?): IBinder? = null
 
     override fun onDestroy() {
-        manager?.removeGroup(channel, null)
+        try {
+            manager?.removeGroup(channel, null)
+        } catch (e: Exception) {}
         super.onDestroy()
     }
 }

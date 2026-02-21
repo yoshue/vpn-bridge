@@ -4,11 +4,13 @@ plugins {
 }
 
 android {
-    namespace 'com.tuapp.vpnhotspot'
+    // Hemos actualizado el namespace para que coincida con la nueva identidad
+    namespace 'com.tuapp.vpnbridge.final'
     compileSdk 34
 
     defaultConfig {
-        applicationId "com.tuapp.vpnhotspot"
+        // Al cambiar este ID, el teléfono cree que es una app diferente y nueva
+        applicationId "com.tuapp.vpnbridge.final"
         minSdk 29
         targetSdk 34
         versionCode 1
@@ -30,7 +32,9 @@ android {
 }
 
 dependencies {
-    // Solo lo estrictamente necesario para evitar el error de "Duplicate Class"
+    // Estas son las librerías necesarias para que la app tenga botones y diseño
     implementation 'androidx.core:core-ktx:1.12.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
+    implementation 'com.google.android.material:material:1.11.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
 }

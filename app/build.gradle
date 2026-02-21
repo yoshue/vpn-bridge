@@ -2,27 +2,44 @@ plugins {
     id 'com.android.application'
     id 'kotlin-android'
 }
+
 android {
+    // El namespace debe coincidir con la carpeta de tu código Java/Kotlin
     namespace 'com.tuapp.vpnhotspot'
+    
     compileSdk 33
+
     defaultConfig {
         applicationId "com.tuapp.vpnhotspot"
-        minSdk 29
+        minSdk 29 // Android 10
         targetSdk 33
         versionCode 1
         versionName "1.0"
+
+        testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
     }
+
+    buildTypes {
+        release {
+            minifyEnabled false
+            proguardFiles getDefaultProguardFile('proguard-android-optimize.txt'), 'proguard-rules.pro'
+        }
+    }
+    
     compileOptions {
         sourceCompatibility JavaVersion.VERSION_17
         targetCompatibility JavaVersion.VERSION_17
     }
+    
     kotlinOptions {
         jvmTarget = '17'
     }
 }
+
 dependencies {
+    // Librerías básicas para que la app no falle al abrirse
     implementation 'androidx.core:core-ktx:1.10.0'
     implementation 'androidx.appcompat:appcompat:1.6.1'
     implementation 'com.google.android.material:material:1.9.0'
+    implementation 'androidx.constraintlayout:constraintlayout:2.1.4'
 }
-

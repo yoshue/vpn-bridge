@@ -14,83 +14,55 @@ class BridgeService : Service() {
     private var manager: WifiP2pManager? = null
     private var channel: WifiP2pManager.Channel? = null
     private var proxy: ProxyServer? = null
+    private val canalId = "VPN_BRIDGE_PRO"
 
-    // El servidor que moverá los datos de la VPN a la TV
+    // --- ARTILLERÍA: Servidor Proxy para mover los datos ---
     private inner class ProxyServer(port: Int) : NanoHTTPD(port) {
         override fun serve(session: IHTTPSession): Response {
-            // Este es el túnel: recibe petición y responde usando la red del móvil (VPN)
-            return newFixedLengthResponse(Response.Status.OK, "text/plain", "Bridge OK")
+            // Este servidor responde a la TV usando la conexión activa del móvil (VPN)
+            return newFixedLengthResponse(Response.Status.OK, "text/plain", "Bridge Conectado")
         }
     }
 
     override fun onCreate() {
         super.onCreate()
-        startForeground(1, notification())
+        startForeground(1, crearNotificacion())
         
-        // Iniciamos el motor en el puerto 8282
+        // Iniciamos el motor de datos en el puerto 8282
         proxy = ProxyServer(8282)
         try {
             proxy?.start(NanoHTTPD.SOCKET_READ_TIMEOUT, false)
         } catch (e: IOException) {
-            Log.e("VPNBridge", "Error Proxy: ${e.message}")
+            Log.e("VPNBridge", "Error al iniciar motor de datos: ${e.message}")
         }
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         manager = getSystemService(Context.WIFI_P2P_SERVICE) as WifiP2pManager
         channel = manager?.initialize(this, mainLooper, null)
-        
+
+        // --- LIMPIEZA DE ANTENA (Para evitar Error P2P: 2) ---
+        // Intentamos forzar el cierre de cualquier red previa que bloquee el hardware
         manager?.removeGroup(channel, object : WifiP2pManager.ActionListener {
-            override fun onSuccess() { crearGrupo() }
-            override fun onFailure(p0: Int) { crearGrupo() }
+            override fun onSuccess() {
+                Log.d("VPNBridge", "Antena liberada, creando grupo...")
+                iniciarCreacionDeRed()
+            }
+            override fun onFailure(reason: Int) {
+                // Si falla (porque no hay grupo previo), intentamos crear la red igualmente
+                iniciarCreacionDeRed()
+            }
         })
+        
         return START_STICKY
     }
 
-    private fun crearGrupo() {
+    private fun iniciarCreacionDeRed() {
         manager?.createGroup(channel, object : WifiP2pManager.ActionListener {
             override fun onSuccess() {
-                Handler(Looper.getMainLooper()).postDelayed({ 
-                    actualizarUI() 
+                // Esperamos 3 segundos a que EMUI estabilice la red antes de pedir los datos
+                Handler(Looper.getMainLooper()).postDelayed({
+                    solicitarDatosDeRed()
                 }, 3000)
             }
-            override fun onFailure(p0: Int) { 
-                enviarBroadcast("Error P2P: $p0") 
-            }
-        })
-    }
-
-    private fun actualizarUI() {
-        manager?.requestGroupInfo(channel) { group ->
-            if (group != null) {
-                val info = "MODO PRO ACTIVO\n\nRED: ${group.networkName}\nCLAVE: ${group.passphrase}\n\nPuerto: 8282"
-                enviarBroadcast(info)
-            }
-        }
-    }
-
-    private fun enviarBroadcast(msg: String) {
-        val i = Intent("VPN_BRIDGE_UPDATE").putExtra("info", msg)
-        sendBroadcast(i)
-    }
-
-    override fun onDestroy() {
-        proxy?.stop()
-        manager?.removeGroup(channel, null)
-        super.onDestroy()
-    }
-
-    override fun onBind(intent: Intent?) = null
-
-    private fun notification(): Notification {
-        val canalId = "BRIDGE_CH"
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            val nm = getSystemService(NotificationManager::class.java)
-            nm.createNotificationChannel(NotificationChannel(canalId, "VPN", NotificationManager.IMPORTANCE_LOW))
-        }
-        return NotificationCompat.Builder(this, canalId)
-            .setContentTitle("Puente Pro")
-            .setSmallIcon(android.R.drawable.ic_menu_share)
-            .build()
-    }
-}
+            override fun onFailure(reason: Int)
